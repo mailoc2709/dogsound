@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ghi Âm Thanh từ Micro</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+        }
+        h1 {
+            color: #2c3e50;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        #recordButton {
+            background-color: #e74c3c;
+        }
+        #recordButton:hover {
+            background-color: #c0392b;
+        }
+        #recordButton.recording {
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { background-color: #e74c3c; }
+            50% { background-color: #c0392b; }
+            100% { background-color: #e74c3c; }
+        }
+        audio {
+            width: 100%;
+            margin: 20px 0;
+        }
+        .visualizer {
+            height: 100px;
+            width: 100%;
+            background-color: #ecf0f1;
+            margin: 20px 0;
+            position: relative;
+            overflow: hidden;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .error {
+            background-color: #fadbd8;
+            color: #c0392b;
+        }
+        .info {
+            background-color: #d4edf7;
+            color: #2980b9;
+        }
+    </style>
+</head>
+<body>
+    <h1>Ghi Âm Thanh từ Micro</h1>
+    
+    <div class="controls">
+        <button id="recordButton">Bắt đầu Ghi Âm</button>
+        <button id="stopButton" disabled>Dừng Ghi Âm</button>
+        <button id="playButton" disabled>Phát Lại</button>
+        <button id="downloadButton" disabled>Tải Xuống</button>
+    </div>
+    
+    <div id="status" class="status"></div>
+    
+    <div class="visualizer">
+        <canvas id="visualizer"></canvas>
+    </div>
+    
+    <audio id="audioPlayer" controls></audio>
+    
+    <script>
+        // Các biến toàn cục
+        let mediaRecorder;
+        let audioChunks = [];
+        let audioBlob;
+        let audioUrl;
+        let audioContext;
+        let analyser;
+        let canvasCtx;
+        let animationId;
+        
+        // Các phần tử DOM
+        const recordButton = document.getElementById('recordButton');
+        const stopButton = document.getElementById('stopButton');
+        const playButton = document.getElementById('playButton');
+        const downloadButton = document.getElementById('downloadButton');
+        const audioPlayer = document.getElementById('audioPlayer');
+        const statusDiv = document.getElementById('status');
+        const canvas = document.getElementById('visualizer');
+        
+        // Bắt đầu ghi âm
+        recordButton.addEventListener('click', async () => {
+            try {
+                statusDiv.className = 'status info';
+                statusDiv.textContent = 'Đang yêu cầu quyền truy cập micro...';
+                
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                // Khởi tạo MediaRecorder
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                
+                // Thiết lập sự kiện
+                mediaRecorder.ondataavailable = event => {
+                    audioChunks.push(event.data);
+                };
+                
+                mediaRecorder.onstop = () => {
+                    audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    audioUrl = URL.createObjectURL(audioBlob);
+                    audioPlayer.src = audioUrl;
+                    
+                    // Kích hoạt các nút
+                    playButton.disabled = false;
+                    downloadButton.disabled = false;
+                    
+                    // Dừng tất cả các track của stream
+                    stream.getTracks().forEach(track => track.stop());
+                    
+                    // Dừng visualizer
+                    if (animationId) {
+                        cancelAnimationFrame(animationId);
+                    }
+                };
+                
+                // Bắt đầu ghi âm
+                mediaRecorder.start();
+                
+                // Cập nhật UI
+                recordButton.disabled = true;
+                recordButton.classList.add('recording');
+                stopButton.disabled = false;
+                
+                statusDiv.textContent = 'Đang ghi âm...';
+                
+                // Khởi tạo AudioContext và Analyser cho visualizer
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                const source = audioContext.createMediaStreamSource(stream);
+                source.connect(analyser);
+                analyser.fftSize = 256;
+                
+                // Thiết lập canvas
+                canvas.width = canvas.offsetWidth;
+                canvas.height = canvas.offsetHeight;
+                canvasCtx = canvas.getContext('2d');
+                
+                // Bắt đầu vẽ visualizer
+                drawVisualizer();
+                
+            } catch (error) {
+                statusDiv.className = 'status error';
+                statusDiv.textContent = `Lỗi: ${error.message}`;
+                console.error('Lỗi khi truy cập micro:', error);
+            }
+        });
+        
+        // Dừng ghi âm
+        stopButton.addEventListener('click', () => {
+            mediaRecorder.stop();
+            recordButton.disabled = false;
+            recordButton.classList.remove('recording');
+            stopButton.disabled = true;
+            statusDiv.className = 'status info';
+            statusDiv.textContent = 'Ghi âm đã dừng. Bạn có thể phát lại hoặc tải xuống.';
+        });
+        
+        // Phát lại bản ghi âm
+        playButton.addEventListener('click', () => {
+            audioPlayer.play();
+        });
+        
+        // Tải xuống bản ghi âm
+        downloadButton.addEventListener('click', () => {
+            const a = document.createElement('a');
+            a.href = audioUrl;
+            a.download = 'ban-ghi-am.wav';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        });
+        
+        // Hàm vẽ visualizer
+        function drawVisualizer() {
+            if (!analyser) return;
+            
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            analyser.getByteFrequencyData(dataArray);
+            
+            canvasCtx.fillStyle = 'rgb(236, 240, 241)';
+            canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const barWidth = (canvas.width / bufferLength) * 2.5;
+            let x = 0;
+            
+            for (let i = 0; i < bufferLength; i++) {
+                const barHeight = (dataArray[i] / 255) * canvas.height;
+                
+                canvasCtx.fillStyle = `rgb(${50 + dataArray[i]}, 50, 150)`;
+                canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+                
+                x += barWidth + 1;
+            }
+            
+            animationId = requestAnimationFrame(drawVisualizer);
+        }
+        
+        // Kiểm tra hỗ trợ trình duyệt
+        window.onload = () => {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                statusDiv.className = 'status error';
+                statusDiv.textContent = 'Trình duyệt của bạn không hỗ trợ ghi âm hoặc trang web này không được phép truy cập micro.';
+                recordButton.disabled = true;
+            }
+        };
+    </script>
+</body>
+</html>
